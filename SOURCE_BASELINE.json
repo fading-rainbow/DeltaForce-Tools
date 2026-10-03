@@ -1,0 +1,8 @@
+{
+  "project": "DeltaForce-Tools",
+  "source_kind": "current local AutoHotkey tools; raw game logs/configuration excluded",
+  "development_base": null,
+  "production": null,
+  "public_sanitization": [],
+  "scope": "source only; no runtime config, database, login, or deployment"
+}

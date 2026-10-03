@@ -1,0 +1,13 @@
+
+
+# Runtime/private files: never synchronize
+*.ini
+*.log
+captures/
+decoded/
+output/
+artifacts/
+*.exe
+
+# Runtime/private files: never synchronize
+!SOURCE_BASELINE.json
