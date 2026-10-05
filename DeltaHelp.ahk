@@ -1,9 +1,24 @@
 ; Integrated Delta Help; no login and no session expiry.
-InitDeltaHelp() {
+InitDeltaHelp(configPath := "") {
 global
-DH_ConfigPath := A_ScriptDir "\DeltaHelp.ini"
+local initIndex, initHk
+static initialized := false
+DH_ConfigPath := (configPath != "") ? configPath : A_ScriptDir "\DeltaHelp.ini"
 OnExit("DH_OnExit")
 macroActive := 0
+ShiftZToggleHotkey := "~XBUTTON1"
+ShiftZIntervalMs := 300
+shiftZActive := 0
+shiftZNextKey := "Shift"
+DH_ShiftZSender := Func("DH_SendShiftZKey")
+if (initialized) {
+for initIndex, initHk in DH_RegisteredHotkeys {
+Hotkey, %initHk%, Off, UseErrorLevel
+}
+}
+initialized := true
+DH_RegisteredHotkeys := []
+SetTimer, DH_ShiftZTick, Off
 moveInterval := 10
 fastStep := 0
 slowStep := 0
@@ -37,6 +52,8 @@ GuiMaxHoldMs := maxHoldMs
 GuiIntervalMs := moveInterval
 GuiJitter := jitterFactor
 GuiM14Hotkey := StripLeadingTilde(M14ToggleHotkey)
+GuiShiftZHotkey := StripLeadingTilde(ShiftZToggleHotkey)
+GuiShiftZIntervalS := (ShiftZIntervalMs / 1000.0)
 GuiLightHotkey := StripLeadingTilde(LightArmHotkey)
 GuiLightWindowS := (LightWindowMs / 1000.0)
 GuiLightSendKeyL := LightSendKeyL
@@ -57,6 +74,7 @@ CreateDeltaHelpGui()
 Gosub, M14ApplySettings
 Gui, M14:Hide
 M14GuiVisible := 0
+DH_UpdateShiftZStatus()
 }
 UpdateAutoBreathTimer() {
 global BreathEnabled, autoBreathInterval
@@ -123,12 +141,12 @@ Gui, M14:New, +AlwaysOnTop +ToolWindow, Delta Help
 Gui, M14:+DPIScale
 Gui, M14:Margin, 8, 8
 Gui, M14:Font, s10, Microsoft YaHei UI
-x1 := 10, x2 := 360
+x1 := 10, x2 := 340, x3 := 630
 wEdit := 180
 wLeft := x2 - x1 - 20
 yTop := 10
 M14_AddText(yTop, x1, 520, "Remember to click Apply to save your settings.", "cGray")
-M14_AddText(yTop, x1, 520, "Settings persist across restarts. Motion starts OFF. F9 remains unchanged.", "cGray")
+M14_AddText(yTop, x1, 580, "Settings persist. Motion and Shift/Z start OFF. F9 remains unchanged.", "cGray")
 yTop += 4
 yL := yTop
 M14_AddText(yL, x1, wLeft, "Stage 1 (first):")
@@ -169,14 +187,23 @@ M14_AddText(yR, x2, 240, "While LButton down send:")
 M14_AddEdit(yR, x2, wEdit, "GuiLightSendKeyL")
 M14_AddText(yR, x2, 240, "While RButton down send:")
 M14_AddEdit(yR, x2, wEdit, "GuiLightSendKeyR")
-yR += 6
-M14_AddText(yR, x2, 240, "Auto breath:")
-M14_AddCheck(yR, x2, 240, "GuiBreathEnabled", "Hold a key while LButton is down")
-M14_AddText(yR, x2, 240, "Breath key name (e.g. Shift/LCtrl/Space):")
-M14_AddEdit(yR, x2, wEdit, "GuiBreathKey")
-yR += 6
-M14_AddButton(yR, x2, wEdit, "M14ApplySettings", "Apply")
-M14_AddText(yR, x2, 240, "F8: show/hide`nLight: arm then next L/RButton sends key", "cGray")
+; 新功能横向放到第三列，不增加原两列的纵向高度。
+yZ := yTop
+M14_AddText(yZ, x3, 300, "Shift / Z 交替循环：")
+M14_AddText(yZ, x3, 300, "循环开关（可与 Delta Help switch 同键）：")
+M14_AddEdit(yZ, x3, wEdit, "GuiShiftZHotkey")
+M14_AddText(yZ, x3, 300, "每次按键间隔（秒，默认 0.3）：")
+M14_AddEdit(yZ, x3, wEdit, "GuiShiftZIntervalS")
+M14_AddText(yZ, x3, 300, "按一次开始，再按一次停止。", "cGray")
+M14_AddText(yZ, x3, 300, "Shift/Z 循环：关闭", "vDH_ShiftZStatus")
+yZ += 12
+M14_AddText(yZ, x3, 300, "Auto breath:")
+M14_AddCheck(yZ, x3, 300, "GuiBreathEnabled", "Hold a key while LButton is down")
+M14_AddText(yZ, x3, 300, "Breath key name (e.g. Shift/LCtrl/Space):")
+M14_AddEdit(yZ, x3, wEdit, "GuiBreathKey")
+yZ += 6
+M14_AddButton(yZ, x3, wEdit, "M14ApplySettings", "Apply")
+M14_AddText(yZ, x3, 300, "F8: show/hide`nLight: arm then next L/RButton sends key", "cGray")
 GuiControl, M14:, GuiH1, %GuiH1%
 GuiControl, M14:, GuiV1, %GuiV1%
 GuiControl, M14:, GuiStage1Ms, %GuiStage1Ms%
@@ -187,14 +214,16 @@ GuiControl, M14:, GuiIntervalMs, %GuiIntervalMs%
 GuiControl, M14:, GuiJitter, %GuiJitter%
 GuiControl, M14:, GuiHoldMode, %GuiHoldMode%
 GuiControl, M14:, GuiM14Hotkey, %GuiM14Hotkey%
+GuiControl, M14:, GuiShiftZHotkey, %GuiShiftZHotkey%
+GuiControl, M14:, GuiShiftZIntervalS, %GuiShiftZIntervalS%
 GuiControl, M14:, GuiLightHotkey, %GuiLightHotkey%
 GuiControl, M14:, GuiLightWindowS, %GuiLightWindowS%
 GuiControl, M14:, GuiLightSendKeyL, %GuiLightSendKeyL%
 GuiControl, M14:, GuiLightSendKeyR, %GuiLightSendKeyR%
 GuiControl, M14:, GuiBreathEnabled, %GuiBreathEnabled%
 GuiControl, M14:, GuiBreathKey, %GuiBreathKey%
-Gui, M14:Show, AutoSize
-M14GuiVisible := 1
+Gui, M14:Show, Hide AutoSize
+M14GuiVisible := 0
 }
 ResetCarry() {
 global carryX, carryY
@@ -241,49 +270,125 @@ break
 }
 return "~" . prefixes . hk
 }
-SetDynamicHotkey(ByRef currentHk, newHk, label) {
-oldHk := currentHk
-if (oldHk != "") {
-Hotkey, %oldHk%, Off, UseErrorLevel
+DH_HotkeyId(hk) {
+hk := RegExReplace(NormalizeHotkey(hk), "[~$]", "")
+StringUpper, hk, hk
+return hk
 }
-Hotkey, %newHk%, %label%, On UseErrorLevel
-if (ErrorLevel) {
-Hotkey, %newHk%, Off, UseErrorLevel
-if (oldHk != "")
-Hotkey, %oldHk%, %label%, On UseErrorLevel
+DH_HotkeyError(m14Hk, lightHk, shiftZHk) {
+if (m14Hk = "" || lightHk = "" || shiftZHk = "")
+return "Hotkeys cannot be empty."
+return ""
+}
+DH_RegisterHotkeys(hotkeys) {
+global DH_RegisteredHotkeys
+for registerIndex, hk in DH_RegisteredHotkeys {
+Hotkey, %hk%, Off, UseErrorLevel
+}
+DH_RegisteredHotkeys := []
+seen := {}
+for registerIndex, hk in hotkeys {
+id := DH_HotkeyId(hk)
+if seen.HasKey(id)
+continue
+; 同键只注册一次，由分发器同时切换两项；I1 忽略本脚本发出的按键。
+Hotkey, %hk%, DH_DispatchHotkey, On UseErrorLevel I1
+if ErrorLevel
 return false
+seen[id] := true
+DH_RegisteredHotkeys.Push(hk)
 }
-currentHk := newHk
 return true
 }
-ApplyHotkeys(m14Hk, lightHk) {
-global M14ToggleHotkey, LightArmHotkey
+ApplyHotkeys(m14Hk, lightHk, shiftZHk) {
+global M14ToggleHotkey, LightArmHotkey, ShiftZToggleHotkey
 m14Hk := EnsureLeadingTilde(m14Hk)
 lightHk := EnsureLeadingTilde(lightHk)
-if (m14Hk = "" || lightHk = "") {
-MsgBox, 262192, Invalid input, Hotkeys cannot be empty.
+shiftZHk := EnsureLeadingTilde(shiftZHk)
+errorText := DH_HotkeyError(m14Hk, lightHk, shiftZHk)
+if (errorText != "") {
+MsgBox, 262192, Invalid input, %errorText%
 return false
 }
-if (RegExMatch(m14Hk, "i)F[89]$") || RegExMatch(lightHk, "i)F[89]$")) {
-MsgBox, 48, Reserved hotkey, F8 and F9 are reserved.
-return false
-}
-if (m14Hk = lightHk) {
-MsgBox, 262192, Invalid input, Delta Help switch hotkey and Light arm hotkey cannot be the same.
-return false
-}
-oldM14 := M14ToggleHotkey
-oldLight := LightArmHotkey
-ok1 := SetDynamicHotkey(M14ToggleHotkey, m14Hk, "M14_Toggle")
-ok2 := SetDynamicHotkey(LightArmHotkey, lightHk, "Light_Arm")
-if (!ok1 || !ok2) {
-SetDynamicHotkey(M14ToggleHotkey, oldM14, "M14_Toggle")
-SetDynamicHotkey(LightArmHotkey, oldLight, "Light_Arm")
+if !DH_RegisterHotkeys([m14Hk, lightHk, shiftZHk]) {
+DH_RegisterHotkeys([M14ToggleHotkey, LightArmHotkey, ShiftZToggleHotkey])
 MsgBox, 262192, Invalid input, Failed to register hotkey(s). Please check AHK hotkey syntax.
 return false
 }
+M14ToggleHotkey := m14Hk
+LightArmHotkey := lightHk
+ShiftZToggleHotkey := shiftZHk
 return true
 }
+DH_HandleHotkey(hk) {
+global M14ToggleHotkey, LightArmHotkey, ShiftZToggleHotkey
+Critical
+id := DH_HotkeyId(hk)
+if (id = DH_HotkeyId(M14ToggleHotkey)) {
+Gosub, M14_Toggle
+}
+if (id = DH_HotkeyId(LightArmHotkey)) {
+Gosub, Light_Arm
+}
+if (id = DH_HotkeyId(ShiftZToggleHotkey))
+DH_ToggleShiftZ()
+Critical, Off
+}
+DH_ParseShiftZInterval(seconds) {
+seconds := Trim(seconds)
+if !RegExMatch(seconds, "^[+]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)$")
+return 0
+if (seconds + 0 < 0.01 || seconds + 0 > 3600)
+return 0
+return Round(seconds * 1000)
+}
+DH_UpdateShiftZStatus() {
+global shiftZActive
+status := shiftZActive ? "开启" : "关闭"
+GuiControl, M14:, DH_ShiftZStatus, % "Shift/Z 循环：" status
+}
+DH_StopShiftZ() {
+global shiftZActive, shiftZNextKey
+Critical
+shiftZActive := 0
+shiftZNextKey := "Shift"
+SetTimer, DH_ShiftZTick, Off
+DH_UpdateShiftZStatus()
+Critical, Off
+}
+DH_ToggleShiftZ() {
+global shiftZActive, shiftZNextKey, ShiftZIntervalMs
+Critical
+if (shiftZActive) {
+DH_StopShiftZ()
+} else {
+shiftZActive := 1
+shiftZNextKey := "Shift"
+SetTimer, DH_ShiftZTick, %ShiftZIntervalMs%
+DH_UpdateShiftZStatus()
+DH_ShiftZTick()
+}
+Critical, Off
+}
+DH_ShiftZTick() {
+global shiftZActive, shiftZNextKey, DH_ShiftZSender
+Critical
+if (shiftZActive) {
+DH_ShiftZSender.Call(shiftZNextKey)
+shiftZNextKey := (shiftZNextKey = "Shift") ? "z" : "Shift"
+}
+Critical, Off
+}
+DH_SendShiftZKey(key) {
+; 点按 Shift、Z，而不是 Shift+Z 组合键或长按。
+SendInput, % "{Blind}{" key "}"
+}
+DH_DispatchHotkey:
+DH_HandleHotkey(A_ThisHotkey)
+; 自定义为键盘按键时，按住不因系统重复事件反复开关。
+DH_waitKey := RegExReplace(A_ThisHotkey, "^[~*$^!+#<>]+")
+KeyWait, %DH_waitKey%
+return
 F8::
 ShowDeltaHelp:
 if (M14GuiVisible) {
@@ -293,6 +398,7 @@ M14GuiVisible := 0
 Gui, M14:Show, AutoSize
 M14GuiVisible := 1
 }
+DH_UpdateShiftZStatus()
 return
 M14_Toggle:
 macroActive := !macroActive
@@ -379,6 +485,8 @@ jitter := GuiJitter + 0
 holdMode := (GuiHoldMode ? 1 : 0)
 newM14Hk := GuiM14Hotkey
 newLightHk := GuiLightHotkey
+newShiftZHk := GuiShiftZHotkey
+newShiftZInterval := DH_ParseShiftZInterval(GuiShiftZIntervalS)
 newLightWindowS := GuiLightWindowS + 0
 newLightSendKeyL := Trim(GuiLightSendKeyL)
 newLightSendKeyR := Trim(GuiLightSendKeyR)
@@ -436,8 +544,20 @@ if (newBreathEnabled && newBreathKey = "") {
 MsgBox, 262192, Invalid input, Auto breath key cannot be empty.
 return
 }
-if (!ApplyHotkeys(newM14Hk, newLightHk))
+if (!newShiftZInterval) {
+MsgBox, 262192, Invalid input, Shift/Z interval must be between 0.01 and 3600 seconds.
 return
+}
+if (!ApplyHotkeys(newM14Hk, newLightHk, newShiftZHk))
+return
+ShiftZIntervalMs := newShiftZInterval
+GuiShiftZHotkey := StripLeadingTilde(ShiftZToggleHotkey)
+GuiShiftZIntervalS := (ShiftZIntervalMs / 1000.0)
+GuiControl, M14:, GuiShiftZHotkey, %GuiShiftZHotkey%
+GuiControl, M14:, GuiShiftZIntervalS, %GuiShiftZIntervalS%
+if (shiftZActive) {
+SetTimer, DH_ShiftZTick, %ShiftZIntervalMs%
+}
 moveInterval := interval
 jitterFactor := jitter
 maxHoldMs := maxHold
@@ -473,6 +593,7 @@ M14GuiClose:
 M14GuiEscape:
 Gui, M14:Hide
 M14GuiVisible := 0
+DH_UpdateShiftZStatus()
 return
 MouseMoveTick:
 if (!macroActive) {
@@ -551,7 +672,7 @@ DllCall("mouse_event", "UInt", 0x0001, "Int", dx, "Int", dy, "UInt", 0, "UPtr", 
 return
 
 DH_Fields() {
-    return "GuiH1,GuiV1,GuiStage1Ms,GuiH2,GuiV2,GuiMaxHoldMs,GuiIntervalMs,GuiJitter,GuiHoldMode,GuiM14Hotkey,GuiLightHotkey,GuiLightWindowS,GuiLightSendKeyL,GuiLightSendKeyR,GuiBreathEnabled,GuiBreathKey"
+    return "GuiH1,GuiV1,GuiStage1Ms,GuiH2,GuiV2,GuiMaxHoldMs,GuiIntervalMs,GuiJitter,GuiHoldMode,GuiM14Hotkey,GuiLightHotkey,GuiLightWindowS,GuiLightSendKeyL,GuiLightSendKeyR,GuiBreathEnabled,GuiBreathKey,GuiShiftZHotkey,GuiShiftZIntervalS"
 }
 DH_LoadSettings() {
     global
@@ -580,6 +701,7 @@ DH_SaveSettings() {
 }
 DH_OnExit(reason, code) {
     global BreathEnabled
+    DH_StopShiftZ()
     BreathEnabled := 0
     EnsureBreathKey(0)
 }

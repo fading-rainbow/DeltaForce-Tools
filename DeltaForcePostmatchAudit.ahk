@@ -8,6 +8,7 @@ ListLines, Off
 
 global APP_TITLE := "DeltaForce Radar"
 global GuiH1, GuiV1, GuiStage1Ms, GuiH2, GuiV2, GuiMaxHoldMs, GuiIntervalMs, GuiJitter, GuiHoldMode, GuiM14Hotkey, GuiLightHotkey, GuiLightWindowS, GuiLightSendKeyL, GuiLightSendKeyR, GuiBreathEnabled, GuiBreathKey
+global GuiShiftZHotkey, GuiShiftZIntervalS, DH_ShiftZStatus
 global LOG_PATH := ""
 global XOR_KEY := 0x5C
 global MAX_CHUNK := 1048576
