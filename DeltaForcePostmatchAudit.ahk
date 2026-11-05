@@ -360,17 +360,6 @@ CandidateRemaining() {
     return remaining < 0 ? 0 : remaining
 }
 
-RemainingIsComplete() {
-    global g_Match
-    if !IsObject(g_Match) || !g_Match.Active
-        return false
-    if (g_Match.RosterOrder.Length() != g_Match.InitialCount)
-        return false
-    ; 新版不再给远端玩家输出可绑定 UID 的死亡回调。当前算式只能给出
-    ; “未被日志证明已经离场”的上限，不能继续显示成精确剩余人数。
-    return !g_Match.DeathProtocolUpdated
-}
-
 RemainingDisplay() {
     global g_Match
     remaining := CandidateRemaining()
