@@ -1,5 +1,211 @@
-; DeltaForcePostmatchAudit development regression tests.
+﻿; DeltaForcePostmatchAudit development regression tests.
 ; Optional include: the release script runs normally when this file is absent.
+
+RunPopulationReviewTest() {
+    global g_Match, g_ReviewChecks, g_ReviewFailures
+    g_ReviewChecks := 0
+    g_ReviewFailures := 0
+    t1 := ParseLogTime("[2026.11.05-12.00.01:000]")
+    t2 := ParseLogTime("[2026.11.05-12.00.02:000]")
+    t3 := ParseLogTime("[2026.11.05-12.00.03:000]")
+    t4 := ParseLogTime("[2026.11.05-12.00.04:000]")
+
+    ReviewFixture()
+    SetSelfUid("0")
+    SetSelfUid("1001")
+    ReviewCheck(g_Match.SelfUid = "1001", "zero UID must not capture self")
+    RecordLocalCorpseSignal(t1, "review")
+    ReviewCheck(CandidateRemaining() = 2, "local corpse decrements once")
+    RecordLocalCorpseSignal(t2, "review duplicate")
+    ReviewCheck(CandidateRemaining() = 2, "duplicate local death is idempotent")
+
+    ReviewFixture()
+    ProcessLine("[2026.11.05-12.00.01:000] OnEnter ImpendingDeath : 9999 isAutonomous = 0")
+    ReviewCheck(CandidateRemaining() = 3, "foreign UID must not reduce count")
+    ReviewCheck(!g_Match.Downed.HasKey(UidKey("9999")), "foreign UID excluded from state sets")
+
+    ReviewFixture()
+    ProcessLine("[2026.11.05-12.00.01:000] OnEnter ImpendingDeath : 1001 isAutonomous = 0")
+    ReviewCheck(CandidateRemaining() = 2 && !IsAliveUid("1001"), "downed removes player from count and list")
+    ProcessLine("[2026.11.05-12.00.01:100] OnEnter ImpendingDeath : 1001 isAutonomous = 0")
+    ReviewCheck(CandidateRemaining() = 2, "duplicate knockdown must not double-decrement")
+    RecordDownedRescue("1001", t2, "review")
+    ReviewCheck(CandidateRemaining() = 3, "rescue restores player")
+    RecordDownedRescue("1001", t2, "review duplicate")
+    ReviewCheck(g_Match.DownedRescueEvents.Length() = 1, "duplicate rescue must not add again")
+    ProcessLine("[2026.11.05-12.00.03:000] OnEnter ImpendingDeath : 1001 isAutonomous = 0")
+    RecordDownedRescue("1001", t2, "stale rescue")
+    ReviewCheck(CandidateRemaining() = 2, "older rescue cannot undo a newer knockdown")
+    RecordCorpse("1001", t4, "review")
+    ReviewCheck(CandidateRemaining() = 2 && !g_Match.Downed.HasKey(UidKey("1001")), "downed to corpse is exclusive")
+    RecordBox("1001", t4, "review")
+    ReviewCheck(CandidateRemaining() = 2 && !g_Match.Corpses.HasKey(UidKey("1001")), "corpse to box is exclusive")
+    ReviewCheck(TimeLabel(g_Match.Boxes[UidKey("1001")].DeathTime) = TimeLabel(t3), "death time remains the latest knockdown, not the later box time")
+
+    ReviewFixture()
+    ProcessLine("[2026.11.05-12.00.01:000] OnEnter ImpendingDeath : 1001 isAutonomous = 0")
+    RecordBox("1001", t2, "direct box")
+    ReviewCheck(CandidateRemaining() = 2, "downed directly to box must not double-decrement")
+    ReviewCheck(!g_Match.Downed.HasKey(UidKey("1001")), "box removes downed set membership")
+    ReviewCheck(InStr(BuildLiveReport(), "死亡列表（1；含可救援倒地）"), "death list includes boxed player counted in summary")
+
+    ReviewFixture()
+    RecordEscape("1001", t1, "review")
+    ProcessLine("[2026.11.05-12.00.02:000] OnEnter ImpendingDeath : 1001 isAutonomous = 0")
+    RecordCorpse("1001", t3, "trailing corpse")
+    RecordBox("1001", t4, "trailing box")
+    ReviewCheck(CandidateRemaining() = 2, "escaped player cannot also count as dead")
+    ReviewCheck(!g_Match.Downed.HasKey(UidKey("1001")) && !g_Match.Corpses.HasKey(UidKey("1001")) && !g_Match.Boxes.HasKey(UidKey("1001")), "escaped terminal state remains exclusive")
+
+    ReviewFixture()
+    ProcessLine("[2026.11.05-12.00.01:000] OnEnter ImpendingDeath : 1001 isAutonomous = 0")
+    RecordCorpseRescue("1001", t2, "ClientNotifySOLRescue RescueType=2")
+    ReviewCheck(CandidateRemaining() = 3, "UID rescue restores downed when newer logs omit corpse event")
+
+    ReviewFixture()
+    ProcessLine("[2026.11.05-12.00.01:000] OnEnter ImpendingDeath : 1001 isAutonomous = 1")
+    ProcessLine("[2026.11.05-12.00.02:000] _OnCharacterIsAliveStateChanged, 1, 3")
+    ReviewCheck(CandidateRemaining() = 3, "local AliveState 3 to 1 restores downed player")
+
+    ReviewFixture()
+    RecordCorpse("1001", t1, "review")
+    g_Match.Corpses[UidKey("1001")].ObservedTick := A_TickCount - 300000
+    PromoteCorpseTimeouts(t2)
+    ReviewCheck(g_Match.Corpses.HasKey(UidKey("1001")), "historical log age takes precedence over replay wall clock")
+
+    ReviewFixture()
+    SetSelfUid("1001")
+    RecordLocalCorpseSignal(t1, "review")
+    RecordBox("1001", t2, "review")
+    ReviewCheck(CandidateRemaining() = g_Match.RosterOrder.Length() - ObjectCount(g_Match.Boxes), "state count and alive list agree")
+    ReviewCheck(SortedRosterBySpawn(true).Length() = CandidateRemaining(), "alive list length equals remaining count")
+
+    ; 同一进程连续切换不同人数的模拟局，不继承旧状态或固定人数。
+    for _, n in [13, 14, 18] {
+        ReviewFixture(n)
+        ReviewCheck(CandidateRemaining() = n, "per-match PlayerNum " n)
+    }
+    ReviewFixture()
+    ProcessLine("[2026.11.05-12.00.01:000] OnEnter ImpendingDeath : 1001 isAutonomous = 0")
+    RecordEscape("1001", t2, "review")
+    ReviewCheck(CandidateRemaining() = 2 && !g_Match.Downed.HasKey(UidKey("1001")), "downed to escaped does not double-decrement")
+    RecordDownedRescue("1001", t3, "trailing rescue")
+    ReviewCheck(CandidateRemaining() = 2, "trailing rescue cannot re-add escaped player")
+
+    ReviewFixture()
+    RecordCorpse("1001", t3, "review")
+    RecordCorpseRescue("1001", t2, "stale corpse rescue")
+    ReviewCheck(g_Match.Corpses.HasKey(UidKey("1001")), "older corpse rescue does not restore a later death")
+
+    ResetMatch(false)
+    g_Match.Active := true
+    g_Match.InitialCount := 3
+    RecordLocalCorpseSignal(t1, "review unbound self")
+    SetSelfUid("0")
+    ReviewCheck(g_Match.LocalCorpseUnknown && CandidateRemaining() = 2, "invalid self does not erase unbound death")
+    SetSelfUid("1001")
+    ReviewCheck(g_Match.LocalCorpseUnknown, "self UID before roster preserves pending death")
+    AddRosterUid("1001")
+    ReviewCheck(!g_Match.LocalCorpseUnknown && g_Match.Corpses.HasKey(UidKey("1001")), "roster arrival binds pending local death")
+    ReviewCheck(CandidateRemaining() = 2, "pending local death is counted once after binding")
+    ReviewCheck(!AddRosterUid("0"), "zero UID cannot enter roster")
+    RunPopulationReferenceTest()
+    FileAppend, % "POPULATION-REVIEW checks=" g_ReviewChecks " failures=" g_ReviewFailures "`n", *
+    if g_ReviewFailures
+        ExitApp, 1
+}
+
+ReviewFixture(n := 3) {
+    global g_Match
+    ResetMatch(false)
+    g_Match.Active := true
+    g_Match.StartTime := ParseLogTime("[2026.11.05-12.00.00:000]")
+    g_Match.InitialCount := n
+    Loop, %n% {
+        uid := (1000 + A_Index) ""
+        AddRosterUid(uid)
+        RememberPlayerName("review-" uid, uid)
+    }
+}
+
+RunPopulationReferenceTest() {
+    global g_Match
+    ; 独立的正常/倒地/尸体参考表，不使用生产集合来推算预期结果。
+    for _, n in [13, 14, 18] {
+        ReviewFixture(n)
+        expected := {}
+        Loop, %n%
+            expected["uid:" (1000 + A_Index)] := "alive"
+        Loop, 120 {
+            step := A_Index
+            uid := (1001 + Mod(step * 7, n)) ""
+            key := UidKey(uid)
+            state := expected[key]
+            stamp := "[2026.11.05-12." Format("{:02}", 1 + Floor(step / 60)) "." Format("{:02}", Mod(step, 60)) ":000]"
+            time := ParseLogTime(stamp)
+            if (state = "alive") {
+                ProcessLine(stamp " OnEnter ImpendingDeath : " uid " isAutonomous = 0")
+                expected[key] := "downed"
+            } else if (state = "downed" && Mod(step, 3) = 0) {
+                RecordCorpse(uid, time, "reference death")
+                expected[key] := "corpse"
+            } else if (state = "downed") {
+                RecordDownedRescue(uid, time, "reference rescue")
+                expected[key] := "alive"
+            } else {
+                RecordCorpseRescue(uid, time, "reference corpse rescue")
+                expected[key] := "alive"
+            }
+            alive := 0
+            for _, refState in expected
+                if (refState = "alive")
+                    alive += 1
+            ReviewCheck(CandidateRemaining() = alive, "reference model remaining, N=" n " step=" step)
+            ReviewCheck(SortedRosterBySpawn(true).Length() = alive, "reference model alive list, N=" n " step=" step)
+        }
+    }
+}
+
+ReviewCheck(condition, label) {
+    global g_ReviewChecks, g_ReviewFailures
+    g_ReviewChecks += 1
+    if !condition {
+        g_ReviewFailures += 1
+        FileAppend, % "POPULATION-REVIEW FAIL: " label "`n", *
+    }
+}
+
+RunPopulationReplayTest() {
+    global LOG_PATH, g_Match, g_LastReport
+    global g_ReviewChecks, g_ReviewFailures
+    g_ReviewChecks := 0
+    g_ReviewFailures := 0
+    ResetMatch(false)
+    text := FileOpen(LOG_PATH, "r", "UTF-8").Read()
+    for _, line in StrSplit(text, "`n", "`r") {
+        ProcessLine(line)
+        if (!IsObject(g_Match) || g_Match.InitialCount <= 0)
+            continue
+        keys := {}
+        for _, stateSet in [g_Match.Downed, g_Match.Corpses, g_Match.Boxes, g_Match.Escaped] {
+            for key, event in stateSet {
+                ReviewCheck(g_Match.Roster.HasKey(key), "state UID belongs to current roster")
+                ReviewCheck(!keys.HasKey(key), "state sets are pairwise disjoint")
+                keys[key] := true
+            }
+        }
+        if (g_Match.Active && !g_Match.LocalCorpseUnknown && g_Match.RosterOrder.Length() = g_Match.InitialCount)
+            ReviewCheck(CandidateRemaining() = SortedRosterBySpawn(true).Length(), "real log remaining agrees with alive list")
+        if g_Match.Finalized {
+            FileAppend, % "MATCH " TimeLabel(g_Match.StartTime) " N=" g_Match.InitialCount " roster=" g_Match.RosterOrder.Length() " down=" ObjectCount(g_Match.Downed) " corpse=" ObjectCount(g_Match.Corpses) " box=" ObjectCount(g_Match.Boxes) " escape=" ObjectCount(g_Match.Escaped) " alive=" SortedRosterBySpawn(true).Length() " self=" (g_Match.SelfUid != "" && g_Match.SelfUid != "0") "`n", *
+            ; 每局只输出一次；后续大厅行不会更改 Finalized 状态。
+            g_Match.InitialCount := 0
+        }
+    }
+    FileAppend, % "POPULATION-REPLAY checks=" g_ReviewChecks " failures=" g_ReviewFailures "`n", *
+    if g_ReviewFailures
+        ExitApp, 1
+}
 
 RunSelfTest() {
     RunBufferStabilityTest()
@@ -182,7 +388,7 @@ RunSelfTest() {
     ProcessLine("[2026.08.30-10.40.30:616] UGPCharacterVoiceComponent::OnPlayerDied, Character:4002 SetTimer StopCharacterGameAk")
     AssertContains(BuildLiveReport(), "存活列表（0）", "T4 final deaths remove all three players")
     AssertContains(BuildLiveReport(), "按日志事件口径剩余：0", "T4 final death times remove all three from candidate population")
-    AssertContains(BuildLiveReport(), "死亡列表（2；含可救援倒地）", "recent T4 deaths remain corpse candidates")
+    AssertContains(BuildLiveReport(), "死亡列表（3；含可救援倒地）", "death list includes recent corpses and older box")
     AssertContains(BuildLiveReport(), "成盒 1", "older T4 death advances to inferred box")
 
     ResetMatch()
@@ -435,6 +641,7 @@ RunSelfTest() {
     ProcessLine("[2026.11.05-14.10.56:055] BeginStage GFStageName = EGameFlowStageType::SafeHouse")
     AssertContains(g_LastReport, "按日志事件口径剩余（仅赛后）：1", "updated completed report keeps event-count semantics")
     AssertContains(g_LastReport, "无 UID 的 SettlementComponent::OnPlayerDied 仍被忽略", "updated report explains ignored unbound signal")
+    RunPopulationReviewTest()
     FileAppend, SELFTEST PASS`n, *
 }
 
