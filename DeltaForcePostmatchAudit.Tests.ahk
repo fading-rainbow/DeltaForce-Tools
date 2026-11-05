@@ -1,9 +1,9 @@
-﻿; DeltaForcePostmatchAudit development regression tests.
+; DeltaForcePostmatchAudit development regression tests.
 ; Optional include: the release script runs normally when this file is absent.
 
 RunSelfTest() {
     RunBufferStabilityTest()
-    global g_LastReport, g_Match, MATCH_END_GRACE_MS
+    global g_LastReport, g_Match, MATCH_END_GRACE_MS, g_GameVersion
     ResetMatch()
     lines := []
     lines.Push("[2026.08.26-12.00.00:000] LogStartSpotAlloc: Display: TempMS23-Alloc - Begin[PlayerNum:3, TeamStartNums:1]")
@@ -412,6 +412,29 @@ RunSelfTest() {
         FileAppend, SELFTEST FAIL: player table spawn ordering`n, *
         ExitApp, 1
     }
+
+    ; 2026-11-05 日志协议回归：旧 Character:UID 死亡回调消失，
+    ; 本地改由 GHS_Dead/DeathAction 标记；无 UID 的同名错误必须忽略，
+    ; 剩余人数只能显示为上限，不能继续冒充精确值。
+    ResetMatch()
+    ProcessLine("[2026.11.05-14.02.06:911] GameVersionStr:1.101.37119.18")
+    ProcessLine("[2026.11.05-14.04.54:122] TempMS23-Alloc - Begin[PlayerNum:2, TeamStartNums:1]")
+    ProcessLine("[2026.11.05-14.04.54:123] Member-End: [UId:9501, TeamId:1, TeamIdx:0]")
+    ProcessLine("[2026.11.05-14.04.54:124] Member-End: [UId:9502, TeamId:1, TeamIdx:1]")
+    SetSelfUid("9501")
+    ProcessLine("[2026.11.05-14.09.01:944] OnEnter ImpendingDeath : 9501 isAutonomous = 1")
+    ProcessLine("[2026.11.05-14.09.40:365] UHudManager::AddHudOrState - GHS_Dead")
+    ProcessLine("[2026.11.05-14.09.40:366] SetFPPCameraRotationCalcType =2 PlayerName=BP_DFMCharacter_C_123 Reason=DeathAction::OnEnter")
+    ProcessLine("[2026.11.05-14.09.41:000] UDFMSettlementComponent::OnPlayerDied Controller is null!")
+    updatedLive := BuildLiveReport()
+    AssertContains(updatedLive, "游戏版本：1.101.37119.18", "updated log version captured")
+    AssertContains(updatedLive, "候选场内剩余上限：≤1", "updated protocol reports only an upper bound")
+    AssertContains(updatedLive, "当前尸体/死亡候选：1", "new local death chain records self once")
+    AssertContains(updatedLive, "远端死亡状态不完整", "updated protocol precision downgrade")
+    AssertNotContains(updatedLive, "当前尸体/死亡候选：2", "unbound OnPlayerDied and duplicate DeathAction do not double count")
+    ProcessLine("[2026.11.05-14.10.56:055] BeginStage GFStageName = EGameFlowStageType::SafeHouse")
+    AssertContains(g_LastReport, "候选场内剩余上限（仅赛后）：≤1", "updated completed report keeps upper-bound semantics")
+    AssertContains(g_LastReport, "无 UID 的 SettlementComponent::OnPlayerDied 被忽略", "updated report explains ignored unbound signal")
     FileAppend, SELFTEST PASS`n, *
 }
 
@@ -599,7 +622,10 @@ RunLatestCompletedTest() {
     ; 这里验证结构和互斥集合，不绑定某一局的固定人数/撤离方式，
     ; 避免日志更新后测试把正常结果误判为程序错误。
     AssertContains(g_LastReport, "已建立名单 UID：", "latest roster count")
-    AssertContains(g_LastReport, "存活列表（", "latest alive section")
+    if g_Match.DeathProtocolUpdated
+        AssertContains(g_LastReport, "未被日志证明离场的名单", "latest updated-protocol survivor upper-bound section")
+    else
+        AssertContains(g_LastReport, "存活列表（", "latest alive section")
     AssertContains(g_LastReport, "死亡列表（", "latest death section")
     AssertContains(g_LastReport, "救援列表（", "latest rescue section")
     AssertContains(g_LastReport, "盒子列表（", "latest box section")
