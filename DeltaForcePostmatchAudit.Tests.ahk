@@ -30,7 +30,7 @@ RunSelfTest() {
         ProcessLine(line)
         if InStr(line, "ClientNotifySOLRescue") {
             AssertContains(BuildLiveReport(), "名单完整度：3/3", "overflow UID roster keys")
-            AssertContains(BuildLiveReport(), "候选场内剩余：3", "corpse rescue restores candidate population")
+            AssertContains(BuildLiveReport(), "按日志事件口径剩余：3", "corpse rescue restores candidate population")
             AssertContains(BuildLiveReport(), "尸体救援：1", "corpse rescue count")
             AssertContains(BuildLiveReport(), "存活列表（3）", "rescued player returns to alive list")
             AssertContains(BuildLiveReport(), "救援列表（1）", "rescue list section")
@@ -39,13 +39,13 @@ RunSelfTest() {
         }
     }
 
-    AssertContains(g_LastReport, "候选场内剩余（仅赛后）：1", "candidate population")
+    AssertContains(g_LastReport, "按日志事件口径剩余（仅赛后）：1", "candidate population")
     AssertContains(g_LastReport, "已建立名单 UID：3", "overflow UID roster count")
     AssertContains(g_LastReport, "已识别尸体救援：1", "corpse rescue report")
     AssertNotContains(g_LastReport, "坐标", "completed report has no coordinate module")
     AssertContains(g_LastReport, "确认成功撤离：1", "escape confirmation")
     AssertContains(g_LastReport, "存活列表（1）", "final alive list")
-    AssertContains(g_LastReport, "死亡列表（1）", "final death list")
+    AssertContains(g_LastReport, "死亡列表（1；含可救援倒地）", "final death list")
     AssertContains(g_LastReport, "救援列表（1）", "final rescue list")
     AssertContains(g_LastReport, "盒子列表（0）", "final box list")
     AssertContains(g_LastReport, "撤离玩家列表（1）", "escape player section")
@@ -95,14 +95,14 @@ RunSelfTest() {
     ProcessLine("[2026.08.26-13.01.01:000] ADFMCharacter::IsCanBeRescue Name timeout-target")
     ProcessLine("[2026.08.26-13.01.01:001] ADFMCharacter::IsCanBeRescue bTmpIsDead=1 DeadTickNum=1, bFinishGame=0 IsMatchOver=0 DeathWaitRescueTime=120.000000 bDeathCanRescue=1")
     ProcessLine("[2026.08.26-13.02.02:000] unrelated heartbeat")
-    AssertContains(BuildLiveReport(), "当前尸体/死亡候选：1", "log rescue window overrides fallback timeout")
+    AssertContains(BuildLiveReport(), "当前死亡：1", "log rescue window overrides fallback timeout")
     ProcessLine("[2026.08.26-13.03.01:100] unrelated heartbeat")
-    AssertContains(BuildLiveReport(), "盒子事件：1", "corpse timeout becomes inferred box")
-    AssertContains(BuildLiveReport(), "候选场内剩余：0", "box remains outside candidate population")
+    AssertContains(BuildLiveReport(), "成盒 1", "corpse timeout becomes inferred box")
+    AssertContains(BuildLiveReport(), "按日志事件口径剩余：0", "box remains outside candidate population")
     AssertNotContains(BuildLiveReport(), "坐标", "live report has no coordinate module")
     ProcessLine("[2026.08.26-13.03.02:000] ClientNotifySOLRescue - RescueType: 2, Rescuer: 1002, Target: 13885455241972588702")
-    AssertContains(BuildLiveReport(), "盒子事件：0", "explicit rescue corrects inferred box")
-    AssertContains(BuildLiveReport(), "候选场内剩余：1", "late explicit rescue restores population")
+    AssertContains(BuildLiveReport(), "成盒 0", "explicit rescue corrects inferred box")
+    AssertContains(BuildLiveReport(), "按日志事件口径剩余：1", "late explicit rescue restores population")
 
     ResetMatch()
     ProcessLine("[2026.08.26-14.00.00:000] LogStartSpotAlloc: Display: TempMS23-Alloc - Begin[PlayerNum:3, TeamStartNums:1]")
@@ -122,7 +122,7 @@ RunSelfTest() {
     AssertContains(g_LastReport, "已识别尸体救援：1", "RebornAction corpse rescue")
     AssertContains(g_LastReport, "当前盒子状态：1", "box and escape mutual exclusion")
     AssertContains(g_LastReport, "确认成功撤离：2", "action-first escape pairing")
-    AssertContains(g_LastReport, "候选场内剩余（仅赛后）：0", "SafeHouse match completion")
+    AssertContains(g_LastReport, "按日志事件口径剩余（仅赛后）：0", "SafeHouse match completion")
     AssertContains(g_LastReport, "存活列表（0）", "completed no-alive list")
     AssertContains(g_LastReport, "P01 T5", "team label in completed report")
 
@@ -153,7 +153,7 @@ RunSelfTest() {
     ProcessLine("[2026.08.26-15.10.00:305] ADFMPlayerState::OnRep_ExitState ExitState=3, Uin=3003, PlayerName=rocket-c")
     ProcessLine("[2026.08.26-15.10.01:000] BeginStage GFStageName = EGameFlowStageType::SafeHouse")
     AssertContains(g_LastReport, "确认成功撤离：3", "rocket escapes remain idempotent")
-    AssertContains(g_LastReport, "候选场内剩余（仅赛后）：1", "rocket nearest candidates leave unrelated hidden UID alive")
+    AssertContains(g_LastReport, "按日志事件口径剩余（仅赛后）：1", "rocket nearest candidates leave unrelated hidden UID alive")
 
     ResetMatch()
     ProcessLine("[2026.08.30-10.18.26:118] TempMS23-Alloc - Begin[PlayerNum:3, TeamStartNums:1]")
@@ -174,16 +174,16 @@ RunSelfTest() {
     ProcessLine("[2026.08.30-10.35.20:693] OnEnter ImpendingDeath : 4002 isAutonomous = 0")
     ProcessLine("[2026.08.30-10.35.42:576] UDFMFSM_RebornAction::OnEnter:T4-B")
     AssertContains(BuildLiveReport(), "倒地救起：1", "downed RebornAction is tracked")
-    AssertContains(BuildLiveReport(), "候选场内剩余：3", "downed rescue does not double count population")
+    AssertContains(BuildLiveReport(), "按日志事件口径剩余：3", "downed rescue restores population")
     ProcessLine("[2026.08.30-10.35.39:834] OnEnter ImpendingDeath : 4001 isAutonomous = 0")
     ProcessLine("[2026.08.30-10.35.44:090] UGPCharacterVoiceComponent::OnPlayerDied, Character:4001 SetTimer StopCharacterGameAk")
     ProcessLine("[2026.08.30-10.39.48:451] OnEnter ImpendingDeath : 4003 isAutonomous = 0")
     ProcessLine("[2026.08.30-10.39.50:359] UGPCharacterVoiceComponent::OnPlayerDied, Character:4003 SetTimer StopCharacterGameAk")
     ProcessLine("[2026.08.30-10.40.30:616] UGPCharacterVoiceComponent::OnPlayerDied, Character:4002 SetTimer StopCharacterGameAk")
     AssertContains(BuildLiveReport(), "存活列表（0）", "T4 final deaths remove all three players")
-    AssertContains(BuildLiveReport(), "候选场内剩余：0", "T4 final death times remove all three from candidate population")
-    AssertContains(BuildLiveReport(), "死亡列表（2）", "recent T4 deaths remain corpse candidates")
-    AssertContains(BuildLiveReport(), "盒子事件：1", "older T4 death advances to inferred box")
+    AssertContains(BuildLiveReport(), "按日志事件口径剩余：0", "T4 final death times remove all three from candidate population")
+    AssertContains(BuildLiveReport(), "死亡列表（2；含可救援倒地）", "recent T4 deaths remain corpse candidates")
+    AssertContains(BuildLiveReport(), "成盒 1", "older T4 death advances to inferred box")
 
     ResetMatch()
     ProcessLine("[2026.08.30-11.00.00:000] TempMS23-Alloc - Begin[PlayerNum:1, TeamStartNums:1]")
@@ -414,8 +414,8 @@ RunSelfTest() {
     }
 
     ; 2026-11-05 日志协议回归：旧 Character:UID 死亡回调消失，
-    ; 本地改由 GHS_Dead/DeathAction 标记；无 UID 的同名错误必须忽略，
-    ; 剩余人数只能显示为上限，不能继续冒充精确值。
+    ; 本地改由 GHS_Dead/DeathAction 标记；无 UID 的同名错误必须忽略。
+    ; 用户指定口径为“倒地即死亡，救起恢复存活”，人数按各局 PlayerNum 计算。
     ResetMatch()
     ProcessLine("[2026.11.05-14.02.06:911] GameVersionStr:1.101.37119.18")
     ProcessLine("[2026.11.05-14.04.54:122] TempMS23-Alloc - Begin[PlayerNum:2, TeamStartNums:1]")
@@ -428,13 +428,13 @@ RunSelfTest() {
     ProcessLine("[2026.11.05-14.09.41:000] UDFMSettlementComponent::OnPlayerDied Controller is null!")
     updatedLive := BuildLiveReport()
     AssertContains(updatedLive, "游戏版本：1.101.37119.18", "updated log version captured")
-    AssertContains(updatedLive, "候选场内剩余上限：≤1", "updated protocol reports only an upper bound")
-    AssertContains(updatedLive, "当前尸体/死亡候选：1", "new local death chain records self once")
-    AssertContains(updatedLive, "远端死亡状态不完整", "updated protocol precision downgrade")
-    AssertNotContains(updatedLive, "当前尸体/死亡候选：2", "unbound OnPlayerDied and duplicate DeathAction do not double count")
+    AssertContains(updatedLive, "按日志事件口径剩余：1", "updated protocol uses per-match exact event count")
+    AssertContains(updatedLive, "当前死亡：1", "new local death chain records self once")
+    AssertContains(updatedLive, "倒地立即减一，救起恢复加一", "updated protocol documents downed-count semantics")
+    AssertNotContains(updatedLive, "当前死亡：2", "unbound OnPlayerDied and duplicate DeathAction do not double count")
     ProcessLine("[2026.11.05-14.10.56:055] BeginStage GFStageName = EGameFlowStageType::SafeHouse")
-    AssertContains(g_LastReport, "候选场内剩余上限（仅赛后）：≤1", "updated completed report keeps upper-bound semantics")
-    AssertContains(g_LastReport, "无 UID 的 SettlementComponent::OnPlayerDied 被忽略", "updated report explains ignored unbound signal")
+    AssertContains(g_LastReport, "按日志事件口径剩余（仅赛后）：1", "updated completed report keeps event-count semantics")
+    AssertContains(g_LastReport, "无 UID 的 SettlementComponent::OnPlayerDied 仍被忽略", "updated report explains ignored unbound signal")
     FileAppend, SELFTEST PASS`n, *
 }
 
@@ -474,7 +474,7 @@ RunIntegrationTest() {
         FileAppend, INTEGRATION FAIL: no completed report`n, *
         ExitApp, 1
     }
-    AssertContains(g_LastReport, "候选场内剩余（仅赛后）：3", "integration candidate population")
+    AssertContains(g_LastReport, "按日志事件口径剩余（仅赛后）：3", "integration candidate population")
     AssertNotContains(g_LastReport, "坐标", "integration report has no coordinate module")
     AssertContains(g_LastReport, "确认成功撤离：1", "integration escape")
     FileAppend, INTEGRATION PASS`n, *
@@ -551,7 +551,7 @@ RunActiveNowTest() {
         FileAppend, ACTIVE-NOW FAIL: recovered match has no PlayerNum`n, %resultPath%
         ExitApp, 1
     }
-    candidate := g_Match.InitialCount - ObjectCount(g_Match.Corpses) - ObjectCount(g_Match.Boxes) - ObjectCount(g_Match.Escaped) - (g_Match.LocalCorpseUnknown ? 1 : 0)
+    candidate := g_Match.InitialCount - ObjectCount(g_Match.Downed) - ObjectCount(g_Match.Corpses) - ObjectCount(g_Match.Boxes) - ObjectCount(g_Match.Escaped) - (g_Match.LocalCorpseUnknown ? 1 : 0)
     result := "ACTIVE-NOW PASS roster=" g_Match.RosterOrder.Length() "/" g_Match.InitialCount " corpses=" ObjectCount(g_Match.Corpses) " corpseRescues=" g_Match.RescueEvents.Length() " downedRescues=" g_Match.DownedRescueEvents.Length() " boxes=" ObjectCount(g_Match.Boxes) " escaped=" ObjectCount(g_Match.Escaped) " candidate=" candidate "`n"
     FileAppend, %result%, *
     FileAppend, %result%, %resultPath%
@@ -622,10 +622,7 @@ RunLatestCompletedTest() {
     ; 这里验证结构和互斥集合，不绑定某一局的固定人数/撤离方式，
     ; 避免日志更新后测试把正常结果误判为程序错误。
     AssertContains(g_LastReport, "已建立名单 UID：", "latest roster count")
-    if g_Match.DeathProtocolUpdated
-        AssertContains(g_LastReport, "未被日志证明离场的名单", "latest updated-protocol survivor upper-bound section")
-    else
-        AssertContains(g_LastReport, "存活列表（", "latest alive section")
+    AssertContains(g_LastReport, "存活列表（", "latest alive section")
     AssertContains(g_LastReport, "死亡列表（", "latest death section")
     AssertContains(g_LastReport, "救援列表（", "latest rescue section")
     AssertContains(g_LastReport, "盒子列表（", "latest box section")
@@ -637,7 +634,7 @@ RunLatestCompletedTest() {
             ExitApp, 1
         }
     }
-    candidate := g_Match.InitialCount - ObjectCount(g_Match.Corpses) - ObjectCount(g_Match.Boxes) - ObjectCount(g_Match.Escaped) - (g_Match.LocalCorpseUnknown ? 1 : 0)
+    candidate := g_Match.InitialCount - ObjectCount(g_Match.Downed) - ObjectCount(g_Match.Corpses) - ObjectCount(g_Match.Boxes) - ObjectCount(g_Match.Escaped) - (g_Match.LocalCorpseUnknown ? 1 : 0)
     result := "LATEST-COMPLETED PASS roster=" g_Match.RosterOrder.Length() "/" g_Match.InitialCount " rescued=" ObjectCount(g_Match.Rescued) " boxes=" ObjectCount(g_Match.Boxes) " escaped=" ObjectCount(g_Match.Escaped) " candidate=" candidate " end=" TimeLabel(g_Match.EndTime) "`n"
     FileAppend, %result%, *
 }

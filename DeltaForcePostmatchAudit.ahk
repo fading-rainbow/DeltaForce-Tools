@@ -1,6 +1,6 @@
 #NoEnv
 #SingleInstance Force
-#Warn
+#Warn All, StdOut
 SendMode Input
 SetWorkingDir %A_ScriptDir%
 SetBatchLines, -1
@@ -356,17 +356,14 @@ CandidateRemaining() {
     global g_Match
     if !IsObject(g_Match) || !g_Match.Active || g_Match.InitialCount <= 0
         return ""
-    remaining := g_Match.InitialCount - ObjectCount(g_Match.Corpses) - ObjectCount(g_Match.Boxes) - ObjectCount(g_Match.Escaped) - (g_Match.LocalCorpseUnknown ? 1 : 0)
+    remaining := g_Match.InitialCount - ObjectCount(g_Match.Downed) - ObjectCount(g_Match.Corpses) - ObjectCount(g_Match.Boxes) - ObjectCount(g_Match.Escaped) - (g_Match.LocalCorpseUnknown ? 1 : 0)
     return remaining < 0 ? 0 : remaining
 }
 
 RemainingDisplay() {
-    global g_Match
     remaining := CandidateRemaining()
     if (remaining = "")
         return "--"
-    if g_Match.DeathProtocolUpdated
-        return "≤" remaining "（日志上限）"
     return remaining
 }
 
@@ -394,14 +391,9 @@ BuildOverlayText() {
     }
 
     aliveUids := SortedRosterBySpawn(true)
-    deathCount := ObjectCount(g_Match.Corpses) + (g_Match.LocalCorpseUnknown ? 1 : 0)
-    if g_Match.DeathProtocolUpdated {
-        text .= "`n未证实离场：" aliveUids.Length() "  已确认本地死亡：" deathCount "  撤离数：" ObjectCount(g_Match.Escaped)
-        text .= "`n远端死亡 UID 字段缺失，以下不是确认存活列表（" aliveUids.Length() "）"
-    } else {
-        text .= "`n存活数：" aliveUids.Length() "  死亡数：" deathCount "  成盒数：" ObjectCount(g_Match.Boxes) "  撤离数：" ObjectCount(g_Match.Escaped)
-        text .= "`n存活玩家（" aliveUids.Length() "）"
-    }
+    deathCount := ObjectCount(g_Match.Downed) + ObjectCount(g_Match.Corpses) + ObjectCount(g_Match.Boxes) + (g_Match.LocalCorpseUnknown ? 1 : 0)
+    text .= "`n存活数：" aliveUids.Length() "  死亡数：" deathCount "  成盒数：" ObjectCount(g_Match.Boxes) "  撤离数：" ObjectCount(g_Match.Escaped)
+    text .= "`n存活玩家（" aliveUids.Length() "）"
     if (aliveUids.Length() = 0)
         text .= "`n暂无"
     else {
@@ -1209,9 +1201,12 @@ ProcessLineCore(line) {
             SetSelfUid(uid)
         count := g_Match.Knockdowns.HasKey(key) ? g_Match.Knockdowns[key] : 0
         g_Match.Knockdowns[key] := count + 1
-        g_Match.Downed[key] := {Uid:uid, Time:time}
-        if g_Match.Corpses.HasKey(key)
+        if (g_Match.Corpses.HasKey(key) || g_Match.Boxes.HasKey(key)) {
             AddWarning(PlayerLabel(uid) " 在尸体候选之后再次出现倒地事件。")
+        } else {
+            g_Match.Downed[key] := {Uid:uid, Time:time}
+            AddTimeline(time, PlayerLabel(uid) " 进入倒地，按当前口径记为死亡；被救援后恢复存活")
+        }
     }
 
     if RegExMatch(line, "UGPCharacterVoiceComponent::OnPlayerDied.*?Character:(\d+)\s+SetTimer\s+StopCharacterGameAk", m) {
@@ -1871,7 +1866,7 @@ RecordDownedRescue(uid, time, evidence) {
     g_Match.Downed.Delete(key)
     event := {Uid:uid, Time:time, Evidence:evidence}
     g_Match.DownedRescueEvents.Push(event)
-    AddTimeline(time, PlayerLabel(uid) " 倒地后被救起，仍计为存活（人数不重复增加；" evidence "）")
+    AddTimeline(time, PlayerLabel(uid) " 倒地后被救起，恢复存活并重新计入剩余人数（" evidence "）")
     return true
 }
 
@@ -1895,6 +1890,8 @@ RecordEscape(uid, time, evidence := "ExitState=3 + EscapedStateAction", method :
     }
     if g_Match.Escaped.HasKey(key)
         return
+    if g_Match.Downed.HasKey(key)
+        g_Match.Downed.Delete(key)
     if g_Match.Corpses.HasKey(key)
         RecordCorpseRescue(uid, time, "成功撤离反证此前尸体状态已恢复")
     else if g_Match.Boxes.HasKey(key) {
@@ -2097,7 +2094,8 @@ BuildLiveReport() {
     rescueCount := g_Match.RescueEvents.Length()
     downedRescueCount := g_Match.DownedRescueEvents.Length()
     escapeCount := ObjectCount(g_Match.Escaped)
-    candidate := g_Match.InitialCount - corpseCount - ObjectCount(g_Match.Boxes) - escapeCount - (g_Match.LocalCorpseUnknown ? 1 : 0)
+    downedCount := ObjectCount(g_Match.Downed)
+    candidate := g_Match.InitialCount - downedCount - corpseCount - ObjectCount(g_Match.Boxes) - escapeCount - (g_Match.LocalCorpseUnknown ? 1 : 0)
     if (candidate < 0)
         candidate := 0
     report := "对局状态：进行中`r`n"
@@ -2107,34 +2105,33 @@ BuildLiveReport() {
     report .= "玩家名绑定：" BoundRosterCount(g_Match.UidToName) "/" rosterCount " | 干员ID绑定：" BoundRosterCount(g_Match.HeroByUid) "/" rosterCount "`r`n"
     report .= "出生点映射：" ObjectCount(g_Match.SpawnPoints) "/" rosterCount "（仅统计带 UID 的日志字段）`r`n"
     report .= "游戏版本：" (g_Match.GameVersion != "" ? g_Match.GameVersion : "未从当前读取窗口观察到") "`r`n"
-    if g_Match.DeathProtocolUpdated
-        report .= "候选场内剩余上限：≤" candidate "（新版不再提供远端 UID 死亡回调）`r`n"
-    else
-        report .= "候选场内剩余：" candidate "`r`n"
-    report .= "当前尸体/死亡候选：" corpseCount " | 尸体救援：" rescueCount " | 倒地救起：" downedRescueCount " | 确认撤离：" escapeCount " | 盒子事件：" ObjectCount(g_Match.Boxes) "`r`n"
-    if g_Match.DeathProtocolUpdated
-        report .= "精度：远端死亡状态不完整；不得把上限当作实时精确人数`r`n"
-    else if (rosterCount != g_Match.InitialCount)
+    report .= "按日志事件口径剩余：" candidate "`r`n"
+    report .= "当前死亡：" (downedCount + corpseCount + ObjectCount(g_Match.Boxes) + (g_Match.LocalCorpseUnknown ? 1 : 0)) "（倒地 " downedCount " | 尸体 " corpseCount " | 成盒 " ObjectCount(g_Match.Boxes) "） | 救起：" downedRescueCount " | 确认撤离：" escapeCount "`r`n"
+    if (rosterCount != g_Match.InitialCount)
         report .= "精度：状态不完整（名单尚未收齐）`r`n"
     else
-        report .= "精度：候选值（无服务器权威字段）`r`n"
+        report .= "精度：日志事件口径；倒地立即减一，救起恢复加一，尸体/成盒不重复扣减`r`n"
 
     aliveUids := SortedRosterBySpawn(true)
     aliveCount := aliveUids.Length()
-    if g_Match.DeathProtocolUpdated
-        report .= "`r`n未被日志证明离场的名单（不等于确认存活）（" aliveCount "）`r`n"
-    else
-        report .= "`r`n存活列表（" aliveCount "）`r`n"
+    report .= "`r`n存活列表（" aliveCount "）`r`n"
     report .= WindowPlayerHeader()
     if (aliveCount = 0)
         report .= "暂无`r`n"
     for _, uid in aliveUids
         report .= WindowPlayerRow(uid) "`r`n"
 
-    report .= "`r`n死亡列表（" corpseCount "）`r`n"
+    report .= "`r`n死亡列表（" (downedCount + corpseCount) "；含可救援倒地）`r`n"
     report .= WindowPlayerHeader()
-    if (g_Match.CorpseOrder.Length() = 0)
+    if (downedCount = 0 && g_Match.CorpseOrder.Length() = 0)
         report .= "暂无`r`n"
+    for _, uid in SortedRosterBySpawn() {
+        key := UidKey(uid)
+        if g_Match.Downed.HasKey(key) {
+            event := g_Match.Downed[key]
+            report .= WindowPlayerRow(uid) " @ " TimeLabel(event.Time) " | 倒地，可救援`r`n"
+        }
+    }
     for _, uid in g_Match.CorpseOrder {
         key := UidKey(uid)
         event := g_Match.Corpses[key]
@@ -2149,7 +2146,7 @@ BuildLiveReport() {
     for _, event in g_Match.RescueEvents
         report .= WindowPlayerRow(event.Uid) " @ " TimeLabel(event.Time) "  尸体状态恢复存活（" event.Evidence "）`r`n"
     for _, event in g_Match.DownedRescueEvents
-        report .= WindowPlayerRow(event.Uid) " @ " TimeLabel(event.Time) "  倒地后恢复，人数不重复增加（" event.Evidence "）`r`n"
+        report .= WindowPlayerRow(event.Uid) " @ " TimeLabel(event.Time) "  倒地后恢复存活，剩余人数加一（" event.Evidence "）`r`n"
     report .= "`r`n盒子列表（" ObjectCount(g_Match.Boxes) "）`r`n"
     report .= WindowPlayerHeader()
     if (g_Match.BoxOrder.Length() = 0)
@@ -2173,11 +2170,12 @@ BuildReport() {
     global g_Match
     rosterCount := g_Match.RosterOrder.Length()
     corpseCount := ObjectCount(g_Match.Corpses)
+    downedCount := ObjectCount(g_Match.Downed)
     rescueCount := g_Match.RescueEvents.Length()
     downedRescueCount := g_Match.DownedRescueEvents.Length()
     escapeCount := ObjectCount(g_Match.Escaped)
     unknownLocal := g_Match.LocalCorpseUnknown ? 1 : 0
-    candidate := g_Match.InitialCount - corpseCount - ObjectCount(g_Match.Boxes) - escapeCount - unknownLocal
+    candidate := g_Match.InitialCount - downedCount - corpseCount - ObjectCount(g_Match.Boxes) - escapeCount - unknownLocal
     if (candidate < 0)
         candidate := 0
 
@@ -2192,10 +2190,6 @@ BuildReport() {
     }
     if (g_Match.LocalCorpseUnknown)
         complete := false
-    if g_Match.DeathProtocolUpdated {
-        complete := false
-        AddWarning("游戏版本 " (g_Match.GameVersion != "" ? g_Match.GameVersion : "未知") " 未观察到旧版远端 Character:UID 死亡回调；场内剩余只能给上限。")
-    }
     if (g_Match.Warnings.Length() > 0)
         complete := false
 
@@ -2208,39 +2202,42 @@ BuildReport() {
     report .= "已建立名单 UID：" rosterCount "`r`n"
     report .= "玩家名绑定：" BoundRosterCount(g_Match.UidToName) "/" rosterCount " | 干员ID绑定：" BoundRosterCount(g_Match.HeroByUid) "/" rosterCount "`r`n"
     report .= "出生点映射：" ObjectCount(g_Match.SpawnPoints) "/" rosterCount "（仅统计带 UID 的日志字段）`r`n"
-    report .= "当前尸体 / 死亡候选：" (corpseCount + unknownLocal) "`r`n"
+    report .= "当前死亡：" (downedCount + corpseCount + ObjectCount(g_Match.Boxes) + unknownLocal) "（倒地 " downedCount " | 尸体 " (corpseCount + unknownLocal) " | 成盒 " ObjectCount(g_Match.Boxes) "）`r`n"
     report .= "已识别尸体救援：" rescueCount "`r`n"
     report .= "已识别倒地救起：" downedRescueCount "`r`n"
     report .= "当前盒子状态：" ObjectCount(g_Match.Boxes) "`r`n"
     report .= "确认成功撤离：" escapeCount "`r`n"
-    if g_Match.DeathProtocolUpdated
-        report .= "候选场内剩余上限（仅赛后）：≤" candidate "，远端死亡 UID 字段缺失`r`n"
-    else if complete
-        report .= "候选场内剩余（仅赛后）：" candidate "`r`n"
+    if complete
+        report .= "按日志事件口径剩余（仅赛后）：" candidate "`r`n"
     else
-        report .= "候选场内剩余（仅赛后）：" candidate "，状态不完整 / 不应视为权威值`r`n"
-    report .= "口径：倒地不减人；当前尸体和盒子均不计入场内剩余；同一 UID 可经历多次死亡/救援周期，每次仅在尸体状态确实恢复时重新计入；盒子优先采用日志信号，缺失时才按救援窗口超时推定。`r`n"
+        report .= "按日志事件口径剩余（仅赛后）：" candidate "，名单或状态不完整`r`n"
+    report .= "口径：倒地立即记作死亡并从剩余人数减一；倒地被救起后恢复存活并加一；倒地转尸体、尸体转成盒不重复扣减；确认撤离从场内剩余移除。`r`n"
     if g_Match.DeathProtocolUpdated
-        report .= "新版协议：本地 GHS_Dead/DeathAction 可确认 self 尸体；无 UID 的 SettlementComponent::OnPlayerDied 被忽略；远端死亡缺失时不输出伪精确人数。`r`n"
+        report .= "新版协议：远端以 ImpendingDeath 作为死亡起点；RebornAction 使其恢复存活。本地 GHS_Dead/DeathAction 用于把倒地进一步确认为尸体；无 UID 的 SettlementComponent::OnPlayerDied 仍被忽略。`r`n"
     report .= "`r`n"
 
     aliveUids := SortedRosterBySpawn(true)
     aliveCount := aliveUids.Length()
-    if g_Match.DeathProtocolUpdated
-        report .= "未被日志证明离场的名单（不等于确认存活）（" aliveCount "）`r`n"
-    else
-        report .= "存活列表（" aliveCount "）`r`n"
+    report .= "存活列表（" aliveCount "）`r`n"
     report .= WindowPlayerHeader()
     if (aliveCount = 0)
         report .= "暂无存活且未撤离的名单玩家。`r`n"
     for _, uid in aliveUids
         report .= WindowPlayerRow(uid) "`r`n"
 
-    report .= "`r`n死亡列表（" (corpseCount + unknownLocal) "）`r`n"
+    report .= "`r`n死亡列表（" (downedCount + corpseCount + unknownLocal) "；含可救援倒地）`r`n"
     report .= WindowPlayerHeader()
-    if (g_Match.CorpseOrder.Length() = 0 && !g_Match.LocalCorpseUnknown) {
+    if (downedCount = 0 && g_Match.CorpseOrder.Length() = 0 && !g_Match.LocalCorpseUnknown) {
         report .= "未观察到带 UID 的尸体候选。`r`n"
     } else {
+        for _, uid in SortedRosterBySpawn() {
+            key := UidKey(uid)
+            if g_Match.Downed.HasKey(key) {
+                event := g_Match.Downed[key]
+                report .= WindowPlayerRow(uid) " @ " TimeLabel(event.Time) "`r`n"
+                report .= "  证据：ImpendingDeath；按当前口径记作死亡，但仍可救援`r`n"
+            }
+        }
         for _, uid in g_Match.CorpseOrder {
             key := UidKey(uid)
             event := g_Match.Corpses[key]
@@ -2265,7 +2262,7 @@ BuildReport() {
             report .= "  证据：" event.Evidence "`r`n"
         }
         for _, event in g_Match.DownedRescueEvents {
-            report .= WindowPlayerRow(event.Uid) " @ " TimeLabel(event.Time) "  倒地后恢复（人数不重复增加）`r`n"
+            report .= WindowPlayerRow(event.Uid) " @ " TimeLabel(event.Time) "  倒地后恢复存活（剩余人数加一）`r`n"
             report .= "  证据：" event.Evidence "`r`n"
         }
     }
@@ -2305,7 +2302,8 @@ BuildReport() {
     report .= "`r`n证据限制`r`n"
     report .= "------------------------------------------------------------`r`n"
     report .= "- 本结果是本地结算时的日志重建，不是服务器权威存活人数。`r`n"
-    report .= "- 旧版 UGPCharacterVoiceComponent::OnPlayerDied(Character:UID) 是尸体状态强候选；1.101.37119.x 已未观察到该字段。`r`n"
+    report .= "- 本工具按用户指定口径将 ImpendingDeath 直接记作死亡；它仍是可救援倒地，不等同于尸体或成盒。`r`n"
+    report .= "- 旧版 UGPCharacterVoiceComponent::OnPlayerDied(Character:UID) 只用于把已扣减的倒地进一步确认为尸体；1.101.37119.x 已未观察到该字段。`r`n"
     report .= "- 新版 UDFMSettlementComponent::OnPlayerDied Controller is null 不带 UID，程序明确忽略，绝不按出现次数扣人。`r`n"
     report .= "- 新版 self 尸体采用 GHS_Dead，并以 DeathAction::OnEnter 作兜底；两者按 UID 幂等。`r`n"
     report .= "- 尸体救援采用 Target UID 的 RescueType=2、本地 AliveState 2->1，或尸体状态后的 RebornAction 名称到 UID 映射。`r`n"
@@ -2314,7 +2312,7 @@ BuildReport() {
     report .= "- IsCanBeRescue 的 DeathWaitRescueTime/bDeathCanRescue 优先决定救援窗口；没有该信号时才使用 120 s 兜底。`r`n"
     report .= "- DeadBody/CarryBody Actor 没有可靠 UID 绑定，不能单独用来判定具体玩家成盒。`r`n"
     report .= "- 同一 UID 可经历多次尸体/救援周期；只有当前处于尸体或超时推定盒子状态时，救援才会重新增加候选存活人数。`r`n"
-    report .= "- ImpendingDeath 后的 RebornAction 记为倒地救起；因为倒地本身不减人，所以该事件不会重复增加人数。`r`n"
+    report .= "- ImpendingDeath 后的 RebornAction 记为倒地救起：移除死亡状态，并把该玩家重新计入剩余人数。`r`n"
     report .= "- 出生点原始名称只采用带 UID 的 AllocStartSpot AdjustLoc/Find Name；显示时可附加用户确认的 TeamStart 别名，日志未绑定 UID 时仍显示‘未记录’，不从队伍号猜测。`r`n"
 
     if (g_Match.Warnings.Length() > 0) {
@@ -2471,7 +2469,7 @@ PlayerStatus(uid) {
     if g_Match.Corpses.HasKey(key)
         return "死亡"
     if g_Match.Downed.HasKey(key)
-        return "倒地（仍计存活）"
+        return "死亡（倒地，可救援）"
     return "存活"
 }
 
@@ -2651,6 +2649,7 @@ IsAliveUid(uid) {
     return g_Match.Roster.HasKey(key)
         && !g_Match.Corpses.HasKey(key)
         && !g_Match.Boxes.HasKey(key)
+        && !g_Match.Downed.HasKey(key)
         && !g_Match.Escaped.HasKey(key)
 }
 
@@ -2737,10 +2736,7 @@ UpdateMatchStatus() {
     }
     if g_Match.Active {
         rosterCount := g_Match.RosterOrder.Length()
-        if g_Match.DeathProtocolUpdated
-            GuiControl, 1:, MatchText, % "对局：记录中 | 开局 " TimeLabel(g_Match.StartTime) " | 名单 " rosterCount "/" g_Match.InitialCount " | 剩余人数仅有上限 " RemainingDisplay()
-        else
-            GuiControl, 1:, MatchText, % "对局：实时中 | 开局 " TimeLabel(g_Match.StartTime) " | 名单 " rosterCount "/" g_Match.InitialCount " | 候选剩余 " RemainingDisplay()
+        GuiControl, 1:, MatchText, % "对局：实时中 | 开局 " TimeLabel(g_Match.StartTime) " | 名单 " rosterCount "/" g_Match.InitialCount " | 按日志口径剩余 " RemainingDisplay()
     } else if (g_LastReport != "") {
         GuiControl, 1:, MatchText, % "对局：已于 " TimeLabel(g_Match.EndTime) " 进入本地结算，赛后报告已解锁"
     } else {
